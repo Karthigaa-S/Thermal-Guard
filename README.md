@@ -95,7 +95,6 @@ Lithium-ion EV batteries are susceptible to **thermal runaway** &mdash; a self-r
 
 | Aspect | Implementation |
 |--------|----------------|
-| **Sampling frequency** | 2 Hz (500ms main loop), DHT22 at 0.4 Hz (2.5s min interval) |
 | **Signal conditioning** | 4x ADC oversampling on current and voltage channels |
 | **Filtering method** | 5-sample moving average on all 4 sensor channels (temp, humidity, current, voltage) |
 | **Detection / estimation logic** | SOC linear estimation, speed from hall pulse counting (5s window), raw DHT22 40-bit protocol via custom bit-bang |
@@ -193,7 +192,7 @@ ThermalGuard/
 
 ## 6. Demo Video
 
-**[INSERT PUBLIC VIDEO LINK HERE]**
+**[https://drive.google.com/drive/folders/1ZOtxO-NuoBaImg3FCoNBx7cp2x2i4pwQ]**
 
 The demo video (max 5 minutes) covers:
 1. System power-on and WiFi/MQTT connection sequence
