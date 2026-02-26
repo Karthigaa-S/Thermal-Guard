@@ -1,0 +1,33 @@
+# Build artifacts
+*.o
+*.elf
+*.hex
+*.bin
+*.map
+build/
+
+# Arduino IDE
+.arduino/
+*.ino.cpp
+*.ino.hex
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# OS
+*.log
+*.tmp

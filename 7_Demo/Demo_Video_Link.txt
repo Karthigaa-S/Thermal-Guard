@@ -1,0 +1,14 @@
+ThermalGuard -- Demo Video
+==========================
+
+[INSERT PUBLIC VIDEO LINK HERE]
+
+Example: https://youtube.com/watch?v=XXXXX
+
+Video should demonstrate (max 5 minutes):
+1. System power-on and WiFi/MQTT connection
+2. Dashboard receiving live telemetry data
+3. All sensor readings displayed on OLED and dashboard
+4. Motor control via web dashboard (FWD, BWD, LEFT, RIGHT, STOP)
+5. Anomaly detection response (heat sensor, observe score change)
+6. MQTT auto-reconnect after disconnect

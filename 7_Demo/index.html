@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThermalGuard | EV Battery Safety — Live Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/mqtt@4.3.8/dist/mqtt.min.js"></script>
+    <style>
+        /* ================================================================
+           Same theme as simulator — no sim controls in this version
+           ================================================================ */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-primary: #0a0e17; --bg-card: #111926; --bg-card-alt: #0d1420;
+            --border: #1e2d3d; --border-hover: #2a4a6a;
+            --text-primary: #e0e6f0; --text-secondary: #607080; --text-muted: #405060;
+            --accent-blue: #00d4ff; --accent-green: #00ff88; --accent-yellow: #ffd93d;
+            --accent-orange: #ff8c00; --accent-red: #ff4444; --accent-critical: #ff0040;
+            --accent-purple: #a855f7;
+            --zone-cold: #00b4d8; --zone-optimal: #00ff88; --zone-warm: #ffd93d;
+            --zone-warning: #ff8c00; --zone-danger: #ff4444; --zone-critical: #ff0040;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #0f1724, #1a2332); padding: 14px 28px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .header h1 { font-size: 1.4em; font-weight: 700; background: linear-gradient(90deg, var(--accent-blue), var(--accent-green)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header .subtitle { font-size: 0.78em; color: var(--text-secondary); margin-top: 2px; }
+        .status-badge { display: flex; align-items: center; gap: 8px; font-size: 0.85em; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-red); animation: pulse 2s infinite; }
+        .status-dot.connected { background: var(--accent-green); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+        .analytics-row { display: grid; grid-template-columns: 200px 1fr repeat(3, 160px); gap: 16px; padding: 16px 24px 0; }
+        .metric-card { background: linear-gradient(145deg, var(--bg-card), var(--bg-card-alt)); border: 1px solid var(--border); border-radius: 14px; padding: 18px; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 14px 14px 0 0; }
+        .metric-label { font-size: 0.7em; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 6px; font-weight: 600; }
+        .metric-value { font-size: 2.2em; font-weight: 700; line-height: 1; }
+        .metric-unit { font-size: 0.75em; color: var(--text-secondary); margin-top: 4px; }
+        .metric-status { font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-top: 6px; padding: 2px 10px; border-radius: 4px; background: rgba(0,255,136,0.12); color: var(--accent-green); }
+        .gauge-container { position: relative; width: 140px; height: 80px; }
+        .gauge-container svg { width: 100%; height: 100%; }
+        .gauge-value { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); font-size: 1.8em; font-weight: 700; }
+        .gauge-label-bottom { font-size: 0.65em; color: var(--text-muted); text-align: center; margin-top: 2px; }
+        .zone-bar-wrap { width: 100%; margin: 8px 0 4px; }
+        .zone-bar { width: 100%; height: 14px; border-radius: 7px; position: relative; background: linear-gradient(90deg, var(--zone-cold) 0%, var(--zone-cold) 12%, var(--zone-optimal) 12%, var(--zone-optimal) 38%, var(--zone-warm) 38%, var(--zone-warm) 55%, var(--zone-warning) 55%, var(--zone-warning) 72%, var(--zone-danger) 72%, var(--zone-danger) 85%, var(--zone-critical) 85%, var(--zone-critical) 100%); overflow: visible; }
+        .zone-marker { position: absolute; top: -6px; width: 4px; height: 26px; background: white; border-radius: 2px; transition: left 0.5s ease; box-shadow: 0 0 8px rgba(255,255,255,0.6); }
+        .zone-labels { display: flex; justify-content: space-between; margin-top: 3px; font-size: 0.55em; color: var(--text-muted); }
+
+        .dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; padding: 16px 24px 0; }
+        .card { background: linear-gradient(145deg, var(--bg-card), var(--bg-card-alt)); border: 1px solid var(--border); border-radius: 14px; padding: 20px; position: relative; overflow: hidden; transition: transform 0.2s, border-color 0.3s; }
+        .card:hover { transform: translateY(-1px); border-color: var(--border-hover); }
+        .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 14px 14px 0 0; }
+        .card.voltage::before { background: linear-gradient(90deg, #00d4ff, #0088cc); }
+        .card.current::before { background: linear-gradient(90deg, #ff6b6b, #cc3333); }
+        .card.temp::before { background: linear-gradient(90deg, #ffd93d, #cc9900); }
+        .card.speed::before { background: linear-gradient(90deg, #00ff88, #00cc66); }
+        .card.soc::before { background: linear-gradient(90deg, #a855f7, #7c3aed); }
+        .card-label { font-size: 0.72em; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .card-value { font-size: 2.4em; font-weight: 700; line-height: 1; margin-bottom: 2px; }
+        .card.voltage .card-value { color: #00d4ff; }
+        .card.current .card-value { color: #ff6b6b; }
+        .card.temp .card-value { color: #ffd93d; }
+        .card.speed .card-value { color: #00ff88; }
+        .card.soc .card-value { color: #a855f7; }
+        .card-unit { font-size: 0.8em; color: var(--text-secondary); }
+        .soc-bar-bg { margin-top: 12px; background: #1a2332; border-radius: 6px; height: 8px; overflow: hidden; }
+        .soc-bar-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #ff4444, #ffd93d, #00ff88); transition: width 0.5s ease; }
+        .card.warning-state { border-color: var(--accent-orange) !important; }
+        .card.danger-state { border-color: var(--accent-red) !important; animation: dangerPulse 1s infinite; }
+        .card.critical-state { border-color: var(--accent-critical) !important; animation: criticalPulse 0.5s infinite; }
+        @keyframes dangerPulse { 0%,100%{border-color: var(--accent-red)} 50%{border-color: #1e2d3d} }
+        @keyframes criticalPulse { 0%,100%{border-color: var(--accent-critical); box-shadow: 0 0 20px rgba(255,0,64,0.3)} 50%{border-color: #1e2d3d; box-shadow: none} }
+
+        .bottom-row { display: grid; grid-template-columns: 1fr 360px; gap: 16px; padding: 16px 24px; }
+        .chart-panel { background: linear-gradient(145deg, var(--bg-card), var(--bg-card-alt)); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+        .chart-panel h3 { font-size: 0.9em; color: var(--text-secondary); margin-bottom: 14px; font-weight: 500; }
+        .chart-container { position: relative; height: 280px; }
+        .alert-panel { background: linear-gradient(145deg, var(--bg-card), var(--bg-card-alt)); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; max-height: 340px; }
+        .alert-panel h3 { font-size: 0.9em; color: var(--text-secondary); margin-bottom: 10px; font-weight: 500; display: flex; justify-content: space-between; align-items: center; }
+        .alert-count { background: var(--accent-red); color: white; font-size: 0.7em; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+        .alert-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+        .alert-list::-webkit-scrollbar { width: 4px; }
+        .alert-list::-webkit-scrollbar-thumb { background: #2a3a4a; border-radius: 2px; }
+        .alert-item { padding: 8px 10px; border-radius: 8px; font-size: 0.75em; border-left: 3px solid; display: flex; flex-direction: column; gap: 2px; }
+        .alert-item.warning { background: rgba(255,140,0,0.08); border-color: var(--accent-orange); }
+        .alert-item.critical { background: rgba(255,0,64,0.08); border-color: var(--accent-critical); }
+        .alert-item .alert-header { display: flex; justify-content: space-between; align-items: center; }
+        .alert-item .alert-type { font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+        .alert-item.warning .alert-type { color: var(--accent-orange); }
+        .alert-item.critical .alert-type { color: var(--accent-critical); }
+        .alert-item .alert-time { color: var(--text-muted); font-size: 0.9em; }
+        .alert-item .alert-msg { color: var(--text-secondary); }
+        .no-alerts { color: var(--text-muted); font-size: 0.82em; text-align: center; padding: 30px 0; }
+        .info-bar { display: flex; justify-content: center; gap: 30px; padding: 10px; color: var(--text-muted); font-size: 0.72em; }
+        /* ── Motor Control Pad ── */
+        .control-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 18px 20px; text-align: center; }
+        .control-title { color: var(--accent-blue); font-size: 1em; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 2px; }
+        .control-pad { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; }
+        .ctrl-row { display: flex; gap: 6px; justify-content: center; }
+        .ctrl-btn { width: 72px; height: 62px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card-alt); color: var(--text-primary); font-size: 1.3em; cursor: pointer; transition: all 0.15s; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+        .ctrl-btn:hover { border-color: var(--accent-blue); background: rgba(0,212,255,0.08); }
+        .ctrl-btn:active { background: rgba(0,212,255,0.2); transform: scale(0.95); }
+        .ctrl-btn small { font-size: 0.45em; letter-spacing: 1px; color: var(--text-secondary); }
+        .ctrl-btn.active { background: rgba(0,255,136,0.2); border-color: var(--accent-green); color: var(--accent-green); box-shadow: 0 0 12px rgba(0,255,136,0.3); }
+        .ctrl-stop { background: rgba(255,0,64,0.1); border-color: var(--accent-critical); }
+        .ctrl-stop:hover { background: rgba(255,0,64,0.2); }
+        .ctrl-status { margin-top: 10px; font-size: 0.8em; color: var(--text-secondary); }
+        /* ── Algorithm Panel (A1-A6) ── */
+        .algo-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; padding: 14px 24px 0; }
+        .algo-card { background: linear-gradient(145deg, var(--bg-card), var(--bg-card-alt)); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; position: relative; overflow: hidden; transition: border-color 0.3s; }
+        .algo-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 12px 12px 0 0; background: var(--border); transition: background 0.3s; }
+        .algo-card.normal::before { background: var(--accent-green); }
+        .algo-card.elevated::before { background: var(--accent-yellow); }
+        .algo-card.warning::before { background: var(--accent-orange); }
+        .algo-card.danger::before, .algo-card.critical::before { background: var(--accent-critical); }
+        .algo-id { font-size: 0.65em; font-weight: 800; letter-spacing: 1.5px; color: var(--text-muted); text-transform: uppercase; }
+        .algo-name { font-size: 0.72em; color: var(--text-secondary); margin: 2px 0 6px; font-weight: 600; }
+        .algo-status { font-size: 0.85em; font-weight: 700; color: var(--accent-green); text-transform: uppercase; }
+        .algo-penalty { position: absolute; top: 10px; right: 10px; font-size: 0.7em; font-weight: 700; color: var(--text-muted); background: rgba(255,255,255,0.04); border-radius: 4px; padding: 1px 6px; }
+        .algo-penalty.penalised { color: var(--accent-red); background: rgba(255,0,64,0.12); }
+        .algo-detail { font-size: 0.68em; color: var(--text-muted); margin-top: 4px; min-height: 16px; }
+        /* Score breakdown tooltip */
+        .score-breakdown { display: flex; gap: 10px; padding: 8px 24px 0; flex-wrap: wrap; }
+        .score-eq { font-size: 0.72em; color: var(--text-secondary); background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 5px 14px; font-family: 'Consolas', monospace; }
+        .score-eq span { color: var(--accent-blue); font-weight: 700; }
+        @media (max-width: 1100px) { .analytics-row { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } .algo-row { grid-template-columns: repeat(3, 1fr); } .dashboard { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } .bottom-row { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div>
+            <h1>ThermalGuard — EV Battery Safety Monitor</h1>
+            <div class="subtitle">VSDSquadron Ultra &nbsp;|&nbsp; THEJAS32 + ESP32-C3 RISC-V &nbsp;|&nbsp; Live Hardware Mode</div>
+        </div>
+        <div class="status-badge">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Analytics Row -->
+    <div class="analytics-row">
+        <div class="metric-card" id="scoreCard">
+            <div class="metric-label">Thermal Safety Score</div>
+            <div class="gauge-container">
+                <svg viewBox="0 0 140 80" id="gaugeSvg">
+                    <path d="M 15 75 A 55 55 0 0 1 125 75" fill="none" stroke="#1a2332" stroke-width="12" stroke-linecap="round"/>
+                    <path d="M 15 75 A 55 55 0 0 1 125 75" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" id="gaugeArc" stroke-dasharray="173" stroke-dashoffset="0"/>
+                    <defs><linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="var(--zone-critical)"/><stop offset="30%" stop-color="var(--zone-danger)"/>
+                        <stop offset="50%" stop-color="var(--zone-warning)"/><stop offset="70%" stop-color="var(--zone-warm)"/>
+                        <stop offset="100%" stop-color="var(--zone-optimal)"/>
+                    </linearGradient></defs>
+                </svg>
+                <div class="gauge-value" id="scoreValue" style="color: var(--accent-green);">100</div>
+            </div>
+            <div class="gauge-label-bottom">0 &#9473;&#9473; SAFE &#9473;&#9473; 100</div>
+        </div>
+        <div class="metric-card" id="zoneCard" style="justify-content: flex-start; padding-top: 14px;">
+            <div class="metric-label">Temperature Zone</div>
+            <div class="metric-value" id="zoneText" style="font-size: 1.6em; color: var(--accent-green); margin: 8px 0 4px;">OPTIMAL</div>
+            <div class="zone-bar-wrap"><div class="zone-bar"><div class="zone-marker" id="zoneMarker" style="left: 25%;"></div></div>
+                <div class="zone-labels"><span>-20&#176;</span><span>10&#176;</span><span>15&#176;</span><span>35&#176;</span><span>45&#176;</span><span>55&#176;</span><span>65&#176;</span><span>100&#176;</span></div>
+            </div>
+            <div style="font-size: 0.72em; color: var(--text-secondary); margin-top: 6px;">Current: <span id="zoneTemp" style="font-weight: 700; color: var(--accent-green);">25.0&#176;C</span></div>
+        </div>
+        <div class="metric-card" id="rateCard">
+            <div class="metric-label">Heating Rate</div>
+            <div class="metric-value" id="rateValue" style="color: var(--accent-green);">0.0</div>
+            <div class="metric-unit">&#176;C / min</div>
+            <div class="metric-status" id="rateStatus">NORMAL</div>
+        </div>
+        <div class="metric-card" id="etaCard">
+            <div class="metric-label">Time to Danger</div>
+            <div class="metric-value" id="etaValue" style="color: var(--text-muted);">--</div>
+            <div class="metric-unit">minutes</div>
+            <div class="metric-status" id="etaStatus" style="background: rgba(96,112,128,0.15); color: var(--text-muted);">SAFE</div>
+        </div>
+        <div class="metric-card" id="coolingCard">
+            <div class="metric-label">Cooling Status</div>
+            <div class="metric-value" id="coolingValue" style="color: var(--accent-green);">OK</div>
+            <div class="metric-unit" id="coolingUnit"></div>
+            <div class="metric-status" id="coolingStatus">ACTIVE</div>
+        </div>
+    </div>
+
+    <!-- Algorithm Status Row (A1 – A6) -->
+    <div class="algo-row">
+        <div class="algo-card normal" id="algoA1">
+            <div class="algo-id">A1</div>
+            <div class="algo-name">Temp Zone</div>
+            <div class="algo-status" id="a1Status">OPTIMAL</div>
+            <div class="algo-detail" id="a1Detail">25.0 °C</div>
+            <div class="algo-penalty" id="a1Penalty">−0 / 30</div>
+        </div>
+        <div class="algo-card normal" id="algoA2">
+            <div class="algo-id">A2</div>
+            <div class="algo-name">Rate of Change</div>
+            <div class="algo-status" id="a2Status">NORMAL</div>
+            <div class="algo-detail" id="a2Detail">0.00 °C/min</div>
+            <div class="algo-penalty" id="a2Penalty">−0 / 15</div>
+        </div>
+        <div class="algo-card normal" id="algoA3">
+            <div class="algo-id">A3</div>
+            <div class="algo-name">Physics (I²R)</div>
+            <div class="algo-status" id="a3Status">NORMAL</div>
+            <div class="algo-detail" id="a3Detail">Residual: 0.0 °C</div>
+            <div class="algo-penalty" id="a3Penalty">−0 / 20</div>
+        </div>
+        <div class="algo-card normal" id="algoA4">
+            <div class="algo-id">A4</div>
+            <div class="algo-name">Cooling Check</div>
+            <div class="algo-status" id="a4Status">OK</div>
+            <div class="algo-detail" id="a4Detail">Under load</div>
+            <div class="algo-penalty" id="a4Penalty">−0 / 10</div>
+        </div>
+        <div class="algo-card normal" id="algoA5">
+            <div class="algo-id">A5</div>
+            <div class="algo-name">Z-Score Spike</div>
+            <div class="algo-status" id="a5Status">STABLE</div>
+            <div class="algo-detail" id="a5Detail">z = 0.00</div>
+            <div class="algo-penalty" id="a5Penalty">−0 / 10</div>
+        </div>
+        <div class="algo-card normal" id="algoA6">
+            <div class="algo-id">A6</div>
+            <div class="algo-name">Time-to-Critical</div>
+            <div class="algo-status" id="a6Status">SAFE</div>
+            <div class="algo-detail" id="a6Detail">ETA: N/A</div>
+            <div class="algo-penalty" id="a6Penalty">−0 / 15</div>
+        </div>
+    </div>
+    <!-- Score equation -->
+    <div class="score-breakdown">
+        <div class="score-eq">Score = max(0, 100 − Σ Penalties) = <span id="scoreEquation">100</span></div>
+        <div class="score-eq" id="penaltyBreakdown">A1:0 + A2:0 + A3:0 + A4:0 + A5:0 + A6:0 = 0</div>
+    </div>
+
+    <!-- Data Cards -->
+    <div class="dashboard">
+        <div class="card voltage"><div class="card-label">Battery Voltage</div><div class="card-value" id="voltageValue">--</div><div class="card-unit">Volts (V)</div></div>
+        <div class="card current"><div class="card-label">Motor Current</div><div class="card-value" id="currentValue">--</div><div class="card-unit">Amps (A)</div></div>
+        <div class="card temp" id="tempCard"><div class="card-label">Temperature</div><div class="card-value" id="tempValue">--</div><div class="card-unit">Celsius (&#176;C)</div></div>
+        <div class="card speed"><div class="card-label">Vehicle Speed</div><div class="card-value" id="speedValue">--</div><div class="card-unit">m/s</div></div>
+        <div class="card soc"><div class="card-label">Battery SOC</div><div class="card-value" id="socValue">--</div><div class="card-unit">%</div><div class="soc-bar-bg"><div class="soc-bar-fill" id="socBar" style="width:0%"></div></div></div>
+    </div>
+
+    <!-- Chart + Alerts -->
+    <div class="bottom-row">
+        <div class="chart-panel">
+            <h3>Temperature &amp; Current — Live Telemetry</h3>
+            <div class="chart-container"><canvas id="liveChart"></canvas></div>
+        </div>
+        <div class="alert-panel">
+            <h3>Anomaly Event Log <span class="alert-count" id="alertCount">0</span></h3>
+            <div class="alert-list" id="alertList"><div class="no-alerts" id="noAlerts">No anomalies detected. System nominal.</div></div>
+        </div>
+    </div>
+    <div class="info-bar">
+        <span>ThermalGuard v1.5</span>
+        <span>Hardware: VSDSquadron Ultra (THEJAS32 + ESP32-C3)</span>
+        <span>MQTT: broker.hivemq.com:8884</span>
+        <span>Topic: ev/telemetry &nbsp;|&nbsp; 2 Hz</span>
+        <span id="messageCount">Samples: 0</span>
+    </div>
+
+    <!-- Motor Control Pad (toggle mode) -->
+    <div class="control-section" id="controlSection">
+        <h3 class="control-title">&#128663; Test Drive Control</h3>
+        <div class="control-pad">
+            <div class="ctrl-row">
+                <button class="ctrl-btn" id="btnFwd" onclick="toggleDrive('FWD')">&#9650;<br><small>FWD</small></button>
+            </div>
+            <div class="ctrl-row">
+                <button class="ctrl-btn" id="btnLeft" onclick="toggleDrive('LEFT')">&#9664;<br><small>LEFT</small></button>
+                <button class="ctrl-btn ctrl-stop" id="btnStop" onclick="toggleDrive('STOP')">&#9724;<br><small>STOP</small></button>
+                <button class="ctrl-btn" id="btnRight" onclick="toggleDrive('RIGHT')">&#9654;<br><small>RIGHT</small></button>
+            </div>
+            <div class="ctrl-row">
+                <button class="ctrl-btn" id="btnBwd" onclick="toggleDrive('BWD')">&#9660;<br><small>BWD</small></button>
+            </div>
+        </div>
+        <div class="ctrl-status" id="ctrlStatus">Click a direction to start — click STOP or same button to stop</div>
+    </div>
+
+<script>
+// =====================================================================
+// DASHBOARD RANGES (toy motor / small battery — adjust to match firmware)
+// =====================================================================
+const DASHBOARD_RANGES = {
+    voltageMax: 10,      // V (e.g. single LiPo 4.2V max; 9V battery use 10)
+    currentMax: 5,       // A (toy motor typically under 2A)
+    tempMin: 0,
+    tempMax: 60,         // °C (overheat warning threshold aligned with firmware)
+    speedMax: 3.0,       // m/s (toy car, 65mm wheel)
+    overheatTemp: 50,    // °C — show warning above this
+    lowSocPct: 20,       // % — low battery warning below this
+};
+
+// =====================================================================
+// THERMAL CONFIGURATION (toy motor: lower danger temp, lower idle current)
+// =====================================================================
+const THERMAL_CONFIG = {
+    zones: { COLD: 5, SUB_OPTIMAL: 12, OPTIMAL_MAX: 32, WARM_MAX: 40, WARNING_MAX: 45, DANGER_MAX: 50 },
+    rate: { NORMAL_MAX: 0.5, ELEVATED_MAX: 1.0, WARNING_MAX: 2.0, WINDOW_SEC: 60 },
+    model: { R_INTERNAL: 0.008, THERMAL_MASS: 800.0, COOLING_COEFFICIENT: 1.50, AMBIENT_TEMP: 28.0 },
+    correlation: { RESIDUAL_WARNING: 5.0, RESIDUAL_CRITICAL: 10.0, SUSTAIN_SAMPLES: 30 },
+    stats: { WINDOW: 30, SIGMA_WARNING: 2.5, SIGMA_CRITICAL: 3.5 },
+    cooling: { IDLE_CURRENT: 0.5, FAIL_TIME_SEC: 60, EXPECTED_RATE: 0.1 },
+};
+
+// =====================================================================
+// ANOMALY DETECTION ENGINE (identical to simulator)
+// =====================================================================
+class ThermalAnomalyEngine {
+    constructor(cfg) {
+        this.cfg = cfg; this.tempHistory = []; this.anomalies = [];
+        this.modelTemp = cfg.model.AMBIENT_TEMP; this.residualStreak = 0;
+        this.idleSince = null; this.sampleCount = 0;
+    }
+    analyze(temp, current, voltage, timestamp) {
+        this.sampleCount++;
+        this.tempHistory.push({ temp, current, voltage, ts: timestamp });
+        if (this.tempHistory.length > 120) this.tempHistory.shift();
+        const zone = this._checkZone(temp), rate = this._checkRate(),
+              corr = this._checkCorrelation(temp, current), spike = this._checkSpike(temp),
+              cooling = this._checkCooling(temp, current, timestamp),
+              eta = this._predictETA(temp, rate.value),
+              score = this._computeScore(zone, rate, corr, cooling);
+        return { zone, rate, corr, spike, cooling, eta, score, modelTemp: this.modelTemp };
+    }
+    _checkZone(temp) {
+        const z = this.cfg.zones; let name, color, severity;
+        if (temp < z.COLD) { name='COLD'; color='var(--zone-cold)'; severity='info'; }
+        else if (temp < z.SUB_OPTIMAL) { name='SUB-OPT'; color='var(--zone-cold)'; severity='info'; }
+        else if (temp < z.OPTIMAL_MAX) { name='OPTIMAL'; color='var(--zone-optimal)'; severity='normal'; }
+        else if (temp < z.WARM_MAX) { name='WARM'; color='var(--zone-warm)'; severity='elevated'; }
+        else if (temp < z.WARNING_MAX) { name='WARNING'; color='var(--zone-warning)'; severity='warning'; }
+        else if (temp < z.DANGER_MAX) { name='DANGER'; color='var(--zone-danger)'; severity='danger'; }
+        else { name='CRITICAL'; color='var(--zone-critical)'; severity='critical'; }
+        if (['warning','danger','critical'].includes(severity))
+            this._addAnomaly('OVER-TEMP', severity, `Temperature entered ${name} zone: ${temp.toFixed(1)}°C`, { temp });
+        return { name, color, severity };
+    }
+    _checkRate() {
+        const w = this.cfg.rate.WINDOW_SEC, h = this.tempHistory;
+        if (h.length < 5) return { value: 0, severity: 'normal', label: 'NORMAL' };
+        const now = h[h.length-1]; let past = h[0];
+        for (let i = h.length-2; i >= 0; i--) { if ((now.ts - h[i].ts) >= w*1000) { past = h[i]; break; } }
+        const dtMs = now.ts - past.ts;
+        if (dtMs < 3000) return { value: 0, severity: 'normal', label: 'NORMAL' };
+        const dtdt = (now.temp - past.temp) / (dtMs / 60000);
+        const r = this.cfg.rate; let severity, label;
+        if (dtdt < r.NORMAL_MAX) { severity='normal'; label='NORMAL'; }
+        else if (dtdt < r.ELEVATED_MAX) { severity='elevated'; label='ELEVATED'; }
+        else if (dtdt < r.WARNING_MAX) { severity='warning'; label='WARNING'; }
+        else { severity='critical'; label='CRITICAL'; }
+        if (['warning','critical'].includes(severity))
+            this._addAnomaly('RAPID-HEAT', severity, `dT/dt = ${dtdt.toFixed(2)}°C/min exceeds threshold`, { dtdt });
+        return { value: dtdt, severity, label };
+    }
+    _checkCorrelation(temp, current) {
+        const m = this.cfg.model;
+        const heatGen = current*current*m.R_INTERNAL;
+        const cool = m.COOLING_COEFFICIENT*(this.modelTemp - m.AMBIENT_TEMP);
+        this.modelTemp += (heatGen - cool)/m.THERMAL_MASS;
+        this.modelTemp = Math.max(m.AMBIENT_TEMP-5, Math.min(120, this.modelTemp));
+        const residual = temp - this.modelTemp, absRes = Math.abs(residual);
+        const c = this.cfg.correlation; let severity='normal', label='NORMAL';
+        if (absRes > c.RESIDUAL_CRITICAL) { this.residualStreak++; if (this.residualStreak >= c.SUSTAIN_SAMPLES) { severity='critical'; label='BROKEN'; this._addAnomaly('CORRELATION','critical',`Temp deviates ${residual.toFixed(1)}°C from model`,{residual}); } }
+        else if (absRes > c.RESIDUAL_WARNING) { this.residualStreak++; if (this.residualStreak >= c.SUSTAIN_SAMPLES) { severity='warning'; label='DRIFT'; this._addAnomaly('CORRELATION','warning',`Temp drifting: ${residual.toFixed(1)}°C residual`,{residual}); } }
+        else { this.residualStreak = Math.max(0, this.residualStreak-1); }
+        return { residual, severity, label };
+    }
+    _checkSpike(temp) {
+        const s = this.cfg.stats, h = this.tempHistory;
+        if (h.length < s.WINDOW) return { severity: 'normal' };
+        const w = h.slice(-s.WINDOW).map(x=>x.temp);
+        const mean = w.reduce((a,b)=>a+b,0)/w.length;
+        const std = Math.sqrt(w.reduce((a,b)=>a+(b-mean)**2,0)/w.length);
+        if (std < 0.01) return { severity: 'normal' };
+        const z = (temp-mean)/std; let severity='normal';
+        if (z > s.SIGMA_CRITICAL) { severity='critical'; this._addAnomaly('SPIKE','critical',`Temp spike: z=${z.toFixed(1)}`,{z,temp}); }
+        else if (z > s.SIGMA_WARNING) { severity='warning'; this._addAnomaly('SPIKE','warning',`Temp anomaly: z=${z.toFixed(1)}`,{z,temp}); }
+        return { severity, zScore: z||0 };
+    }
+    _checkCooling(temp, current, ts) {
+        const c = this.cfg.cooling;
+        if (current > c.IDLE_CURRENT) { this.idleSince = null; return { status:'UNDER-LOAD', severity:'normal' }; }
+        if (!this.idleSince) this.idleSince = ts;
+        const idle = (ts - this.idleSince)/1000;
+        if (idle < 10 || this.tempHistory.length < 10) return { status:'IDLE', severity:'normal' };
+        const rec = this.tempHistory.slice(-10);
+        const rate = (rec[rec.length-1].temp - rec[0].temp)/((rec[rec.length-1].ts - rec[0].ts)/60000);
+        let severity='normal', status='COOLING';
+        if (idle > c.FAIL_TIME_SEC && rate > c.EXPECTED_RATE) { severity='critical'; status='FAILED'; this._addAnomaly('COOLING-FAIL','critical',`Cooling failure after ${Math.round(idle)}s idle`,{rate}); }
+        else if (idle > 15 && rate > 0) { severity='warning'; status='DEGRADED'; this._addAnomaly('COOLING-FAIL','warning',`Cooling degraded at idle`,{rate}); }
+        return { status, severity, coolRate: rate };
+    }
+    _predictETA(temp, dtdt) {
+        if (dtdt <= 0.1) return { minutes: Infinity, severity: 'normal', label: 'SAFE' };
+        const target = this.cfg.zones.DANGER_MAX;
+        if (temp >= target) return { minutes: 0, severity: 'critical', label: 'IN DANGER' };
+        const min = (target - temp)/dtdt; let severity='normal', label='SAFE';
+        if (min < 3) { severity='critical'; label='IMMINENT'; this._addAnomaly('ETA-CRITICAL','critical',`Danger in ${min.toFixed(1)} min`,{min}); }
+        else if (min < 10) { severity='warning'; label='APPROACHING'; this._addAnomaly('ETA-WARNING','warning',`Danger in ${min.toFixed(1)} min`,{min}); }
+        return { minutes: min, severity, label };
+    }
+    _computeScore(zone, rate, corr, cooling) {
+        let s = 100;
+        s -= ({normal:0,info:5,elevated:15,warning:35,danger:60,critical:100}[zone.severity]||0);
+        s -= ({normal:0,elevated:10,warning:25,critical:50}[rate.severity]||0);
+        s -= ({normal:0,warning:15,critical:35}[corr.severity]||0);
+        s -= ({normal:0,warning:10,critical:25}[cooling.severity]||0);
+        return Math.max(0, Math.min(100, Math.round(s)));
+    }
+    _addAnomaly(type, severity, message, values) {
+        const now = Date.now();
+        if (this.anomalies.filter(a => a.type===type && (now-a.ts)<10000).length > 0) return;
+        this.anomalies.push({ type, severity, message, ts: now, values });
+        if (this.anomalies.length > 100) this.anomalies.shift();
+    }
+}
+
+// =====================================================================
+// CHART SETUP
+// =====================================================================
+const MAX_CHART_POINTS = 90;
+const zoneBandPlugin = {
+    id: 'zoneBands',
+    beforeDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea || !scales.yTemp) return;
+        const { left, right } = chartArea;
+        const yScale = scales.yTemp;
+        const zones = [
+            { min:-20,max:15,color:'rgba(0,180,216,0.06)'},{min:15,max:35,color:'rgba(0,255,136,0.06)'},
+            {min:35,max:45,color:'rgba(255,217,61,0.06)'},{min:45,max:55,color:'rgba(255,140,0,0.07)'},
+            {min:55,max:65,color:'rgba(255,68,68,0.08)'},{min:65,max:120,color:'rgba(255,0,64,0.10)'},
+        ];
+        ctx.save();
+        zones.forEach(z => {
+            const yT = yScale.getPixelForValue(Math.min(z.max,yScale.max));
+            const yB = yScale.getPixelForValue(Math.max(z.min,yScale.min));
+            if (yB>yT) { ctx.fillStyle=z.color; ctx.fillRect(left,yT,right-left,yB-yT); }
+        });
+        [{val:35,color:'rgba(255,217,61,0.25)',l:'35°C'},{val:45,color:'rgba(255,140,0,0.3)',l:'45°C'},
+         {val:55,color:'rgba(255,68,68,0.35)',l:'55°C'},{val:65,color:'rgba(255,0,64,0.4)',l:'65°C'}]
+        .forEach(t => {
+            const y = yScale.getPixelForValue(t.val);
+            if (y>=chartArea.top && y<=chartArea.bottom) {
+                ctx.strokeStyle=t.color; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+                ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(right,y); ctx.stroke(); ctx.setLineDash([]);
+                ctx.fillStyle=t.color; ctx.font='10px Segoe UI'; ctx.fillText(t.l,right-32,y-3);
+            }
+        });
+        ctx.restore();
+    }
+};
+Chart.register(zoneBandPlugin);
+
+const chartLabels = [];
+const chartData = {
+    labels: chartLabels,
+    datasets: [
+        { label:'Temperature (°C)', data:[], yAxisID:'yTemp', borderColor:'#ffd93d', backgroundColor:'rgba(255,217,61,0.08)', borderWidth:2.5, fill:true, tension:0.3, pointRadius:0 },
+        { label:'Model Predicted (°C)', data:[], yAxisID:'yTemp', borderColor:'rgba(0,212,255,0.5)', backgroundColor:'transparent', borderWidth:1.5, borderDash:[5,3], fill:false, tension:0.3, pointRadius:0 },
+        { label:'Current (A)', data:[], yAxisID:'yCurrent', borderColor:'#ff6b6b', backgroundColor:'rgba(255,107,107,0.06)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 },
+    ]
+};
+const ctx = document.getElementById('liveChart').getContext('2d');
+const liveChart = new Chart(ctx, {
+    type:'line', data:chartData,
+    options: {
+        responsive:true, maintainAspectRatio:false, animation:{duration:200},
+        plugins:{ legend:{ labels:{ color:'#8090a0', usePointStyle:true, padding:16, font:{size:11} } } },
+        scales: {
+            x:{ display:false },
+            yTemp:{ type:'linear', position:'left', min:DASHBOARD_RANGES.tempMin, max:DASHBOARD_RANGES.tempMax, grid:{color:'rgba(255,255,255,0.04)'}, ticks:{color:'#ffd93d',font:{size:10},callback:v=>v+'°C'}, title:{display:true,text:'Temperature (°C)',color:'#ffd93d',font:{size:10}} },
+            yCurrent:{ type:'linear', position:'right', min:0, max:DASHBOARD_RANGES.currentMax, grid:{drawOnChartArea:false}, ticks:{color:'#ff6b6b',font:{size:10},callback:v=>v+'A'}, title:{display:true,text:'Current (A)',color:'#ff6b6b',font:{size:10}} },
+        },
+        interaction:{ intersect:false, mode:'index' },
+    },
+});
+
+// =====================================================================
+// MQTT + DASHBOARD
+// =====================================================================
+const engine = new ThermalAnomalyEngine(THERMAL_CONFIG);
+let sampleCount = 0, lastRenderedAlertCount = 0;
+
+const BROKER_URL = 'wss://broker.hivemq.com:8884/mqtt';
+const client = mqtt.connect(BROKER_URL, {
+    clientId: 'ev-dash-' + Math.random().toString(16).substring(2, 8),
+    clean: true, connectTimeout: 10000, reconnectPeriod: 3000,
+    keepalive: 60,
+});
+client.on('connect', () => {
+    console.log('[MQTT] Connected to broker');
+    document.getElementById('statusDot').classList.add('connected');
+    document.getElementById('statusText').textContent = 'Connected — Waiting for data';
+    client.subscribe('ev/telemetry');
+    client.subscribe('ev/control');
+});
+
+let activeCmd = null;
+let cmdInterval = null;
+const btnMap = { FWD:'btnFwd', BWD:'btnBwd', LEFT:'btnLeft', RIGHT:'btnRight' };
+
+function sendCmd(cmd) {
+    client.publish('ev/control', JSON.stringify({ cmd: cmd }));
+}
+
+function toggleDrive(cmd) {
+    const el = document.getElementById('ctrlStatus');
+
+    // Clear previous active state
+    Object.values(btnMap).forEach(id => document.getElementById(id).classList.remove('active'));
+    if (cmdInterval) { clearInterval(cmdInterval); cmdInterval = null; }
+
+    if (cmd === 'STOP' || cmd === activeCmd) {
+        sendCmd('STOP');
+        activeCmd = null;
+        el.textContent = 'Stopped';
+        el.style.color = 'var(--text-secondary)';
+        return;
+    }
+
+    activeCmd = cmd;
+    document.getElementById(btnMap[cmd]).classList.add('active');
+    el.textContent = 'Driving: ' + cmd;
+    el.style.color = 'var(--accent-green)';
+
+    sendCmd(cmd);
+    cmdInterval = setInterval(() => sendCmd(cmd), 3000);
+}
+client.on('reconnect', () => {
+    document.getElementById('statusText').textContent = 'Reconnecting...';
+    console.log('[MQTT] Reconnecting...');
+});
+client.on('offline', () => {
+    document.getElementById('statusDot').classList.remove('connected');
+    document.getElementById('statusText').textContent = 'Offline — Retrying...';
+});
+client.on('error', (err) => {
+    document.getElementById('statusDot').classList.remove('connected');
+    document.getElementById('statusText').textContent = 'Error: ' + (err.message || 'Connection failed');
+    console.error('[MQTT] Error:', err);
+});
+client.on('message', (topic, msg) => {
+    if (topic !== 'ev/telemetry') return;
+    try {
+        const data = JSON.parse(msg.toString());
+        if (data.temp_c == null) return;
+        sampleCount++;
+        document.getElementById('statusText').textContent = 'Receiving Live Data';
+        document.getElementById('messageCount').textContent = 'Samples: ' + sampleCount;
+        const result = engine.analyze(data.temp_c, data.motor_a, data.battery_v, data.timestamp || Date.now());
+        updateDashboard(data, result);
+        updateAlgoCards(data, result);
+        updateChart(data, result);
+        updateAlerts(engine.anomalies);
+    } catch(e) { console.error(e); }
+});
+
+function updateDashboard(data, r) {
+    document.getElementById('voltageValue').textContent = data.battery_v.toFixed(2);
+    document.getElementById('currentValue').textContent = data.motor_a.toFixed(2);
+    document.getElementById('tempValue').textContent = data.temp_c.toFixed(1);
+    document.getElementById('speedValue').textContent = data.speed_ms.toFixed(2);
+    document.getElementById('socValue').textContent = data.battery_soc.toFixed(0);
+    document.getElementById('socBar').style.width = Math.max(0,Math.min(100,data.battery_soc))+'%';
+
+    const tc = document.getElementById('tempCard'); tc.className = 'card temp';
+    if (r.zone.severity==='warning'||r.zone.severity==='elevated') tc.classList.add('warning-state');
+    else if (r.zone.severity==='danger') tc.classList.add('danger-state');
+    else if (r.zone.severity==='critical') tc.classList.add('critical-state');
+
+    const socCard = document.querySelector('.card.soc');
+    if (socCard) {
+        if (data.battery_soc < DASHBOARD_RANGES.lowSocPct) socCard.classList.add('warning-state');
+        else socCard.classList.remove('warning-state');
+    }
+
+    const score = r.score;
+    document.getElementById('gaugeArc').setAttribute('stroke-dashoffset', 173 - (score/100)*173);
+    const sv = document.getElementById('scoreValue'); sv.textContent = score;
+    sv.style.color = score>=70?'var(--zone-optimal)':score>=40?'var(--zone-warning)':'var(--zone-critical)';
+
+    document.getElementById('zoneText').textContent = r.zone.name;
+    document.getElementById('zoneText').style.color = r.zone.color;
+    document.getElementById('zoneTemp').textContent = data.temp_c.toFixed(1)+'°C';
+    document.getElementById('zoneTemp').style.color = r.zone.color;
+    const tr = DASHBOARD_RANGES.tempMax - DASHBOARD_RANGES.tempMin;
+    document.getElementById('zoneMarker').style.left = Math.max(0,Math.min(100,((data.temp_c - DASHBOARD_RANGES.tempMin)/tr)*100))+'%';
+
+    const rc = { normal:'var(--accent-green)',elevated:'var(--accent-yellow)',warning:'var(--accent-orange)',critical:'var(--accent-critical)' };
+    document.getElementById('rateValue').textContent = r.rate.value.toFixed(2);
+    document.getElementById('rateValue').style.color = rc[r.rate.severity]||rc.normal;
+    const rs = document.getElementById('rateStatus'); rs.textContent = r.rate.label;
+    rs.style.color = rc[r.rate.severity]||rc.normal;
+    rs.style.background = r.rate.severity==='normal'?'rgba(0,255,136,0.12)':r.rate.severity==='elevated'?'rgba(255,217,61,0.12)':r.rate.severity==='warning'?'rgba(255,140,0,0.12)':'rgba(255,0,64,0.15)';
+
+    const etaEl = document.getElementById('etaValue'), etaS = document.getElementById('etaStatus');
+    if (r.eta.minutes===Infinity||r.eta.minutes>60) { etaEl.textContent='--'; etaEl.style.color='var(--text-muted)'; etaS.textContent='SAFE'; etaS.style.color='var(--accent-green)'; etaS.style.background='rgba(0,255,136,0.12)'; }
+    else { etaEl.textContent=r.eta.minutes.toFixed(1); etaEl.style.color=r.eta.severity==='critical'?'var(--accent-critical)':'var(--accent-orange)'; etaS.textContent=r.eta.label; etaS.style.color=etaEl.style.color; etaS.style.background=r.eta.severity==='critical'?'rgba(255,0,64,0.15)':'rgba(255,140,0,0.12)'; }
+    document.getElementById('etaCard').className = 'metric-card' + (r.eta.severity==='critical'?' critical-state':'');
+
+    const ce=document.getElementById('coolingValue'),cs=document.getElementById('coolingStatus');
+    if (r.cooling.status==='UNDER-LOAD') { ce.textContent='N/A'; ce.style.color='var(--text-muted)'; cs.textContent='UNDER LOAD'; cs.style.color='var(--text-muted)'; cs.style.background='rgba(96,112,128,0.15)'; }
+    else if (r.cooling.severity==='critical') { ce.textContent='FAIL'; ce.style.color='var(--accent-critical)'; cs.textContent='FAILED'; cs.style.color='var(--accent-critical)'; cs.style.background='rgba(255,0,64,0.15)'; }
+    else if (r.cooling.severity==='warning') { ce.textContent='!'; ce.style.color='var(--accent-orange)'; cs.textContent='DEGRADED'; cs.style.color='var(--accent-orange)'; cs.style.background='rgba(255,140,0,0.12)'; }
+    else { ce.textContent='OK'; ce.style.color='var(--accent-green)'; cs.textContent=r.cooling.status; cs.style.color='var(--accent-green)'; cs.style.background='rgba(0,255,136,0.12)'; }
+}
+
+// ── A1-A6 penalty mapping (mirrors THERMAL_CONFIG scoring) ────────────
+const SEVERITY_PENALTY = {
+    A1: { normal:0, info:5, elevated:15, warning:35, danger:60, critical:100 },
+    A2: { normal:0, elevated:10, warning:25, critical:50 },
+    A3: { normal:0, warning:15, critical:35 },
+    A4: { normal:0, warning:10, critical:25 },
+    A5: { normal:0, warning:7,  critical:10 },
+    A6: { normal:0, warning:10, critical:15 },
+};
+const MAX_PENALTY = { A1:30, A2:15, A3:20, A4:10, A5:10, A6:15 };
+const SEV_COLOR   = { normal:'var(--accent-green)', info:'var(--accent-blue)', elevated:'var(--accent-yellow)', warning:'var(--accent-orange)', danger:'var(--accent-red)', critical:'var(--accent-critical)' };
+
+function algoCardSeverityClass(sev) {
+    if (sev==='critical'||sev==='danger') return 'critical';
+    if (sev==='warning')  return 'warning';
+    if (sev==='elevated') return 'elevated';
+    return 'normal';
+}
+
+function setAlgoCard(id, algoKey, severity, statusText, detailText, penaltyVal) {
+    const card = document.getElementById('algo' + algoKey);
+    if (!card) return;
+    card.className = 'algo-card ' + algoCardSeverityClass(severity);
+
+    const statusEl  = document.getElementById(id + 'Status');
+    const detailEl  = document.getElementById(id + 'Detail');
+    const penaltyEl = document.getElementById(id + 'Penalty');
+
+    statusEl.textContent  = statusText;
+    statusEl.style.color  = SEV_COLOR[severity] || SEV_COLOR.normal;
+    detailEl.textContent  = detailText;
+
+    const maxP = MAX_PENALTY[algoKey];
+    penaltyEl.textContent = `−${penaltyVal} / ${maxP}`;
+    penaltyEl.className   = penaltyVal > 0 ? 'algo-penalty penalised' : 'algo-penalty';
+}
+
+function updateAlgoCards(data, r) {
+    // A1 — Temperature Zone
+    const a1p = Math.min(SEVERITY_PENALTY.A1[r.zone.severity] || 0, MAX_PENALTY.A1);
+    setAlgoCard('a1', 'A1', r.zone.severity, r.zone.name,
+                `${data.temp_c.toFixed(1)} °C`, a1p);
+
+    // A2 — Rate of Change
+    const a2p = Math.min(SEVERITY_PENALTY.A2[r.rate.severity] || 0, MAX_PENALTY.A2);
+    setAlgoCard('a2', 'A2', r.rate.severity, r.rate.label,
+                `${r.rate.value.toFixed(2)} °C/min`, a2p);
+
+    // A3 — Physics Correlation (I²R)
+    const a3p = Math.min(SEVERITY_PENALTY.A3[r.corr.severity] || 0, MAX_PENALTY.A3);
+    setAlgoCard('a3', 'A3', r.corr.severity, r.corr.label,
+                `Residual: ${r.corr.residual.toFixed(1)} °C`, a3p);
+
+    // A4 — Cooling Failure
+    const a4p = Math.min(SEVERITY_PENALTY.A4[r.cooling.severity] || 0, MAX_PENALTY.A4);
+    setAlgoCard('a4', 'A4', r.cooling.severity, r.cooling.status,
+                r.cooling.coolRate != null ? `Rate: ${r.cooling.coolRate.toFixed(2)} °C/min` : 'Under load', a4p);
+
+    // A5 — Z-Score Spike
+    const a5p = Math.min(SEVERITY_PENALTY.A5[r.spike.severity] || 0, MAX_PENALTY.A5);
+    const a5z = r.spike.zScore != null ? r.spike.zScore.toFixed(2) : '0.00';
+    setAlgoCard('a5', 'A5', r.spike.severity,
+                r.spike.severity === 'normal' ? 'STABLE' : 'SPIKE',
+                `z = ${a5z}`, a5p);
+
+    // A6 — Time-to-Critical
+    const a6p = Math.min(SEVERITY_PENALTY.A6[r.eta.severity] || 0, MAX_PENALTY.A6);
+    const etaStr = r.eta.minutes === Infinity || r.eta.minutes > 60
+                   ? 'N/A' : r.eta.minutes.toFixed(1) + ' min';
+    setAlgoCard('a6', 'A6', r.eta.severity, r.eta.label,
+                `ETA: ${etaStr}`, a6p);
+
+    // Score equation display
+    const totalPenalty = a1p + a2p + a3p + a4p + a5p + a6p;
+    const finalScore   = Math.max(0, 100 - totalPenalty);
+    document.getElementById('scoreEquation').textContent    = finalScore;
+    document.getElementById('penaltyBreakdown').textContent =
+        `A1:${a1p} + A2:${a2p} + A3:${a3p} + A4:${a4p} + A5:${a5p} + A6:${a6p} = ${totalPenalty}`;
+}
+
+function updateChart(data, result) {
+    chartLabels.push(new Date().toLocaleTimeString());
+    chartData.datasets[0].data.push(data.temp_c);
+    chartData.datasets[1].data.push(Math.round(result.modelTemp*10)/10);
+    chartData.datasets[2].data.push(data.motor_a);
+    if (chartLabels.length > MAX_CHART_POINTS) { chartLabels.shift(); chartData.datasets.forEach(ds=>ds.data.shift()); }
+    const allT = chartData.datasets[0].data;
+    const r = DASHBOARD_RANGES;
+    liveChart.options.scales.yTemp.max = Math.min(r.tempMax, Math.ceil(Math.max(...allT, r.tempMin)/10)*10+10);
+    liveChart.options.scales.yTemp.min = Math.max(r.tempMin, Math.floor(Math.min(...allT, 25)/10)*10-5);
+    liveChart.options.scales.yCurrent.max = r.currentMax;
+    liveChart.update();
+}
+
+function updateAlerts(anomalies) {
+    if (anomalies.length === lastRenderedAlertCount) return;
+    const list = document.getElementById('alertList');
+    const na = document.getElementById('noAlerts'); if (na) na.remove();
+    for (let i = lastRenderedAlertCount; i < anomalies.length; i++) {
+        const a = anomalies[i], item = document.createElement('div');
+        item.className = 'alert-item '+(a.severity==='critical'?'critical':'warning');
+        item.innerHTML = `<div class="alert-header"><span class="alert-type">${a.type}</span><span class="alert-time">${new Date(a.ts).toLocaleTimeString()}</span></div><div class="alert-msg">${a.message}</div>`;
+        list.insertBefore(item, list.firstChild);
+    }
+    lastRenderedAlertCount = anomalies.length;
+    document.getElementById('alertCount').textContent = anomalies.length;
+}
+</script>
+</body>
+</html>
