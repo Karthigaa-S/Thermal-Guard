@@ -107,7 +107,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // ── ACS712-30A ───────────────────────────────────────────────────────
 #define CURRENT_SENSITIVITY  0.066f
-#define CURRENT_ZERO_VOLTS   2.54f   // calibrated from ADC: 1.68V multimeter + ADC offset → 2.54V
+#define CURRENT_ZERO_VOLTS   2.50f   // ACS712 zero = VCC/2 = 2.5V (1.67V after 1k+2k divider)
 #define CURRENT_OFFSET       0.0f   // Tune with CALIBRATION_MODE (motor disconnected)
 
 // ── TOY MOTOR SETUP (battery + wheel) ──────────────────────────────────
@@ -668,7 +668,7 @@ void setup() {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(10, 24);
-    display.print(F("THERMALGUARD v1.5"));
+    display.print(F("THERMALGUARD"));
     display.setCursor(20, 40);
     display.print(F("Initializing..."));
     display.display();
