@@ -200,11 +200,11 @@ The demo video (max 5 minutes) covers:
 3. All sensor values on OLED and dashboard simultaneously
 4. Motor control via the web dashboard (FWD, BWD, LEFT, RIGHT, STOP)
 5. Anomaly detection response when heating is applied
-6. MQTT auto-reconnect after network disruption
+
 
 ---
 
 <p align="center">
-  <b>Built with VSDSquadron ULTRA &mdash; THEJAS32 + ESP32-C3 Dual RISC-V</b><br>
-  ThermalGuard v1.5 &nbsp;|&nbsp; EV Battery Intelligence Challenge
+  <b>Built with VSDSquadron ULTRA &mdash; THEJAS32 + ESP32-C3  RISC-V</b><br>
+  ThermalGuard &nbsp;|&nbsp; EV Battery Intelligence Challenge
 </p>
