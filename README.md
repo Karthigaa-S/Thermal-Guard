@@ -1,12 +1,4 @@
-```
-Submission Requirements:
-- Structured repository mandatory
-- One-page README summary required
-- Raw dataset required
-- Minimum three validation test cases required
-- Demo video (max 5 minutes) required
-- Explicit usage of VSDSquadron ULTRA mandatory
-```
+
 
 ---
 
@@ -23,13 +15,15 @@ Submission Requirements:
 
 ---
 
+![Dashboard Demo](7_Demo/demo.gif)
+
 ## Project Title
 
 **ThermalGuard: Multi-Algorithm Thermal Anomaly Detection for EV Battery Safety**
 
 ## Theme Selected
 
-**Theme 1 &mdash; EV Battery Intelligence**
+**Theme 2 &mdash; Thermal Anomaly Detection **
 
 ---
 
