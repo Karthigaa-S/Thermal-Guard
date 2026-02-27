@@ -47,7 +47,7 @@ Lithium-ion EV batteries are susceptible to **thermal runaway** &mdash; a self-r
 | Aspect | Details |
 |--------|---------|
 | **Compute Platform** | VSDSquadron ULTRA (THEJAS32 RISC-V, 100MHz) + ESP32-C3 (RISC-V, AT firmware) |
-| **Sensors Used** | DHT22 (temperature + humidity), ACS712-30A (motor current), A3144 Hall (wheel speed), Battery voltage (direct ADC) |
+| **Sensors Used** | DHT22 (temperature), ACS712-30A (motor current), A3144 Hall (wheel speed), Battery voltage (direct ADC) |
 | **Interfaces Used** | ADC (ADS1015 I2C, 12-bit), I2C (SSD1306 OLED), UART (ESP32-C3 AT commands), GPIO (L298N motor driver, DHT22 bit-bang, Hall sensor, LED) |
 | **Edge Processing** | 4x ADC oversampling, 5-sample moving average filter, SOC estimation, speed calculation, raw DHT22 bit-bang protocol, MQTT publish/subscribe via AT commands, motor control |
 | **Dashboard** | Single-file HTML/JS with live gauges, charts, 6-algorithm anomaly engine, motor control pad. Connects via MQTT WebSocket (wss://broker.hivemq.com:8884) |
@@ -72,7 +72,7 @@ Lithium-ion EV batteries are susceptible to **thermal runaway** &mdash; a self-r
  +----------------------------------------------+
  |        THEJAS32 (VSDSquadron ULTRA)           |
  |                                               |
- |  DHT22 (GPIO4) --> Temperature + Humidity     |
+ |  DHT22 (GPIO4) --> Temperature                |
  |  ACS712 (A1)   --> Motor Current              |
  |  Battery (A0)  --> Voltage + SOC              |
  |  A3144 (GPIO5) --> Wheel Speed                |
@@ -90,7 +90,7 @@ Lithium-ion EV batteries are susceptible to **thermal runaway** &mdash; a self-r
 | Aspect | Implementation |
 |--------|----------------|
 | **Signal conditioning** | 4x ADC oversampling on current and voltage channels |
-| **Filtering method** | 5-sample moving average on all 4 sensor channels (temp, humidity, current, voltage) |
+| **Filtering method** | 5-sample moving average on all 4 sensor channels (temp, current, voltage) |
 | **Detection / estimation logic** | SOC linear estimation, speed from hall pulse counting (5s window), raw DHT22 40-bit protocol via custom bit-bang |
 | **Output generated** | CSV to Serial Monitor (500ms), JSON to MQTT (2s), OLED display (500ms), L298N motor drive (on command), diagnostic frame (30s) |
 | **MQTT management** | WiFi connect, MQTT connect/publish/subscribe via AT commands, auto-reconnect on disconnect, motor command interception during AT exchanges |
