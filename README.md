@@ -1,12 +1,4 @@
-```
-Submission Requirements:
-- Structured repository mandatory
-- One-page README summary required
-- Raw dataset required
-- Minimum three validation test cases required
-- Demo video (max 5 minutes) required
-- Explicit usage of VSDSquadron ULTRA mandatory
-```
+
 
 ---
 
