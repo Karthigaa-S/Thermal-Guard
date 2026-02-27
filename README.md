@@ -15,6 +15,8 @@
 
 ---
 
+![Dashboard Demo](7_Demo/demo.gif)
+
 ## Project Title
 
 **ThermalGuard: Multi-Algorithm Thermal Anomaly Detection for EV Battery Safety**
