@@ -104,7 +104,7 @@ Lithium-ion EV batteries are susceptible to **thermal runaway** &mdash; a self-r
 | Test Case | Expected Behavior | Observed Result |
 |-----------|-------------------|-----------------|
 | **Normal Operation** | All sensors read valid data, Safety Score = 100, MQTT publishing at 2s | PASS &mdash; Stable readings, score 100, 0.5 Hz publish confirmed |
-| **Motor Drive (Load)** | Current rises, temperature increases, dashboard tracks changes | PASS &mdash; ACS712 reads 1.0-1.5A under load, DHT22 shows 1-2&deg;C rise |
+| **Motor Drive (Load)** | Current rises, temperature increases, dashboard tracks changes | PASS &mdash; ACS712 reads 0.4-0.9A under load, DHT22 shows 1-2&deg;C rise |
 | **MQTT Disconnect Recovery** | Auto-reconnect within 15s, motor holds state, dashboard resumes | PASS &mdash; Reconnects in ~10-15s, motor continues, data flow restores |
 | **Sensor Validation** | Each of 7 test sketches produces correct output | PASS &mdash; All 7 sensors individually verified |
 | **Anomaly Detection** | Algorithms respond to heating events with correct severity | PASS &mdash; Zone shift, rate detection, I&sup2;R correlation all functional |
