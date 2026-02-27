@@ -21,7 +21,7 @@
 
 ## Theme Selected
 
-**Theme 1 &mdash; EV Battery Intelligence**
+**Theme 2 &mdash; Thermal Anomaly Detection **
 
 ---
 
