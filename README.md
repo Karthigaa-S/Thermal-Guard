@@ -23,7 +23,7 @@
 
 ## Theme Selected
 
-**Theme 2 &mdash; Thermal Anomaly Detection **
+**Theme 2 &mdash; Thermal Anomaly Detection**
 
 ---
 
